@@ -86,14 +86,6 @@
     // How far the page's scroll moves the fan, on top of the pointer. The
     // hero sits in a cross-origin iframe and cannot read the parent's scroll
     // itself, so the page posts a 0..1 progress value in (see carrd-iframe.html).
-    // tilt/drift: how far a scroll pass moves the fan. rest: where in that
-    // pass the cards sit at their designed position, 0 = just entering from
-    // the bottom, 1 = just gone off the top. Biased past the middle on purpose
-    // — this hero sits near the top of its page, so it is already well into
-    // its pass on load. Resting late means the cards start low and rise as the
-    // page scrolls, instead of starting half-travelled with nowhere to go.
-    var SCROLL = { tilt: 4, drift: 160, rest: 0.74 };
-
     var SWING = { rx: 5, ry: 9 };
     var DRIFT = 46;                   // design px a z=0 card slides
     var EASE = 0.09;                  // how hard cur chases target per frame
@@ -144,15 +136,12 @@
     // decoded, and we know where the page has it scrolled to. Revealing on
     // decode alone means it appears centred and then snaps into position the
     // moment the first scroll reading lands.
-    var haveShots = false, havePosition = false, revealed = false;
+    var revealed = false;
     function reveal() {
-      if (!haveShots || !havePosition || revealed) return;
+      if (revealed) return;
       revealed = true;
       scene.classList.add('is-ready');
     }
-    // Standalone, with no host page posting anything, nothing would ever
-    // arrive — so stop waiting after a moment and show it centred.
-    setTimeout(function () { havePosition = true; reveal(); }, 500);
     var decoded = els.map(function (e) {
       var img = e.el.firstChild;
       var done = img.decode ? img.decode() :
@@ -167,8 +156,8 @@
         }
       });
     });
-    Promise.all(decoded).then(function () { haveShots = true; reveal(); });
-    setTimeout(function () { haveShots = true; havePosition = true; reveal(); }, 3000);
+    Promise.all(decoded).then(reveal);
+    setTimeout(reveal, 3000);
 
     // ---- layout -----------------------------------------------------------
     var L = null;
@@ -199,8 +188,6 @@
     var dragging = false;
     var pointerIn = false;
     var frame = 0;
-    var scrollTarget = 0;   // -1 above the viewport, +1 below it
-    var scrollCur = 0;
     // Which input last drove the motion. Behaviour keys off this rather than off
     // a device guess: a touchscreen laptop reports a coarse pointer AND has a
     // mouse, so deciding once at load which of the two to listen for would leave
@@ -220,9 +207,8 @@
     function paint() {
       var s = scale;
       var m = L.motion;
-      var sy = scrollCur;
       stage.style.transform =
-        'rotateX(' + (L.camera.rx - cur.y * SWING.rx * m - sy * SCROLL.tilt).toFixed(3) + 'deg) ' +
+        'rotateX(' + (L.camera.rx - cur.y * SWING.rx * m).toFixed(3) + 'deg) ' +
         'rotateY(' + (L.camera.ry + cur.x * SWING.ry * m).toFixed(3) + 'deg) ' +
         'rotateZ(' + L.camera.rz + 'deg)';
       for (var i = 0; i < els.length; i++) {
@@ -231,7 +217,7 @@
         var depth = 1 + z / 460;                    // nearer cards travel further
         els[i].el.style.transform =
           'translate3d(' + (-cur.x * DRIFT * m * depth * s).toFixed(2) + 'px,' +
-          (-(cur.y * DRIFT * 0.55 * m + sy * SCROLL.drift) * depth * s).toFixed(2) + 'px,' +
+          (-cur.y * DRIFT * 0.55 * m * depth * s).toFixed(2) + 'px,' +
           (z * s).toFixed(2) + 'px)';
       }
     }
@@ -279,57 +265,25 @@
     //
     // Treated strictly as data: one finite number from the expected field,
     // clamped, whoever sent it. All it can do is move the fan.
-    var primed = false;
-
-    // Where the hero sits in the viewport, as a 0..1 pass: 0 with its top edge
-    // at the bottom of the screen, 1 once its bottom edge has gone past the
-    // top. Continuous the whole way through, including while it is fully in
-    // view — which is why this is measured rather than sensed with an
-    // IntersectionObserver, which goes flat exactly then.
-    function applyScroll(p) {
-      if (typeof p !== 'number' || !isFinite(p)) return;
-      var d = Math.max(-1, Math.min(1, (Math.max(0, Math.min(1, p)) - SCROLL.rest) * 2));
-      if (d === scrollCur) return;
-      // Applied straight away, never eased: easing a value that already
-      // arrives every frame only adds lag.
-      scrollTarget = scrollCur = d;
-      paint();
-      if (!primed) {
-        primed = true;
-        setTimeout(function () { havePosition = true; reveal(); }, 150);
-      }
-    }
-
-    if (window.top === window.self) {
-      // Running directly in the page: read the scroll first-hand. No message
-      // passing, no handshake, nothing to fall out of sync — this is much the
-      // better case, and the reason to embed inline rather than in an iframe.
-      var readScroll = function () {
-        var r = scene.getBoundingClientRect();
-        applyScroll((window.innerHeight - r.top) / (window.innerHeight + r.height));
-      };
-      window.addEventListener('scroll', readScroll, { passive: true });
-      window.addEventListener('resize', readScroll);
-      readScroll();
-    } else {
-      // In an iframe the hero cannot see the parent's scroll, so the host page
-      // has to post it in. Treated strictly as data: one finite number from
-      // the expected field, whoever sent it. All it can do is move the fan.
-      try {
-        if (window.parent) window.parent.postMessage({ ksHeroHello: true }, '*');
-      } catch (e) {}
-      window.addEventListener('message', function (ev) {
-        if (ev && ev.data && typeof ev.data.ksHeroScroll === 'number') {
-          applyScroll(ev.data.ksHeroScroll);
-        }
-      });
-    }
+    // Nothing happens on scroll, deliberately. A scroll-linked version of
+    // this existed and was dropped: six large screens re-projected in 3D on
+    // every frame made scrolling feel heavy, and no amount of coalescing fixed
+    // it. The page now scrolls at native speed and the hero costs nothing
+    // while it does. The pointer is where the motion lives.
 
     // Mouse / trackpad — always attached, tracked across the page and measured
     // against the scene. Touch pointers are ignored here; they go through the
     // drag path below.
+    var lastX = null, lastY = null;
     window.addEventListener('pointermove', function (ev) {
       if (ev.pointerType === 'touch' || dragging) return;
+      // Scrolling with the cursor resting over the page fires pointermove even
+      // though the pointer has not moved — the element beneath it has. Without
+      // this the hero repaints on every scroll frame, which is exactly the
+      // cost dropping the scroll effect was meant to remove.
+      if (ev.clientX === lastX && ev.clientY === lastY) return;
+      lastX = ev.clientX;
+      lastY = ev.clientY;
       var r = scene.getBoundingClientRect();
       if (!r.width) return;
       var nx = ((ev.clientX - r.left) / r.width - 0.5) * 2;
