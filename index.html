@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Keystone hero</title>
 <style>
-  /* The page IS the hero: no margin, no scrollbars, fills whatever iframe it
-     is given. The iframe's own aspect ratio decides the shape. */
+  /* The page IS the hero: no margin, no scrollbars, filling whatever iframe it
+     is given. The iframe decides the shape; this just fills it. */
   html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: transparent; }
   #ks-hero { height: 100%; }
   #ks-hero .ks-hero__scene { height: 100%; aspect-ratio: auto !important; border-radius: 0; }
@@ -76,7 +76,7 @@
 
 #ks-hero .ks-card {
   position: absolute;
-  border-radius: 4px;
+  border-radius: 8px;
   overflow: hidden;
   background: #fff;
   box-shadow:
@@ -162,7 +162,7 @@
         motion: 1,
         pos: {
           'smart-dashboard':  { x:  775, y:   65, w: 960, z: -150 },
-          'zurich-ar':        { x:  115, y:  220, w: 390, z:  -80 },
+          'zurich-ar':        { x:  115, y:  150, w: 350, z:  -80 },
           'niac-invest':      { x:  553, y:  410, w: 380, z:  -20 },
           'zurich-balance':   { x: 1295, y:  450, w: 700, z:   60 },
           // The two dark screens are the foreground, pushed out to either edge.
@@ -206,6 +206,11 @@
     // margins below: the stage rotates about its own centre, so a card far out
     // to the side swings much further than its own drift, and too much here
     // drags a bleeding card's edge back into frame.
+    // How far the page's scroll moves the fan, on top of the pointer. The
+    // hero sits in a cross-origin iframe and cannot read the parent's scroll
+    // itself, so the page posts a 0..1 progress value in (see carrd-iframe.html).
+    var SCROLL = { tilt: 3, drift: 60 };
+
     var SWING = { rx: 5, ry: 9 };
     var DRIFT = 46;                   // design px a z=0 card slides
     var EASE = 0.09;                  // how hard cur chases target per frame
@@ -299,6 +304,8 @@
     var dragging = false;
     var pointerIn = false;
     var frame = 0;
+    var scrollTarget = 0;   // -1 above the viewport, +1 below it
+    var scrollCur = 0;
     // Which input last drove the motion. Behaviour keys off this rather than off
     // a device guess: a touchscreen laptop reports a coarse pointer AND has a
     // mouse, so deciding once at load which of the two to listen for would leave
@@ -312,7 +319,8 @@
       var s = (scene.clientWidth || L.w) / L.w;
       scene.style.perspective = (PERSPECTIVE * s).toFixed(1) + 'px';
       var m = L.motion;
-      stage.style.setProperty('--ks-rx', (L.camera.rx - cur.y * SWING.rx * m).toFixed(3) + 'deg');
+      var sy = scrollCur;
+      stage.style.setProperty('--ks-rx', (L.camera.rx - cur.y * SWING.rx * m - sy * SCROLL.tilt).toFixed(3) + 'deg');
       stage.style.setProperty('--ks-ry', (L.camera.ry + cur.x * SWING.ry * m).toFixed(3) + 'deg');
       stage.style.setProperty('--ks-rz', L.camera.rz + 'deg');
       for (var i = 0; i < els.length; i++) {
@@ -321,7 +329,7 @@
         var depth = 1 + z / 460;                    // nearer cards travel further
         els[i].el.style.transform =
           'translate3d(' + (-cur.x * DRIFT * m * depth * s).toFixed(2) + 'px,' +
-          (-cur.y * DRIFT * 0.55 * m * depth * s).toFixed(2) + 'px,' +
+          (-(cur.y * DRIFT * 0.55 * m + sy * SCROLL.drift) * depth * s).toFixed(2) + 'px,' +
           (z * s).toFixed(2) + 'px)';
       }
     }
@@ -341,10 +349,12 @@
       var ease = dragging ? EASE_DRAG : EASE;
       cur.x += (target.x - cur.x) * ease;
       cur.y += (target.y - cur.y) * ease;
+      scrollCur += (scrollTarget - scrollCur) * 0.12;
       paint();
 
       var settled = Math.abs(target.x - cur.x) < 0.0006 &&
-                    Math.abs(target.y - cur.y) < 0.0006 && !vel.x && !vel.y;
+                    Math.abs(target.y - cur.y) < 0.0006 &&
+                    Math.abs(scrollTarget - scrollCur) < 0.0006 && !vel.x && !vel.y;
       if (!settled) frame = requestAnimationFrame(render);
     }
     function kick() { if (!frame) frame = requestAnimationFrame(render); }
@@ -357,6 +367,19 @@
     else window.addEventListener('resize', onResize);
 
     if (still) return;   // reduced motion: leave it as a still composition
+
+    // The page this is embedded in posts its scroll progress (see
+    // carrd-iframe.html). Treat it strictly as data: take a finite number in
+    // 0..1 from the expected field and ignore everything else about the
+    // message, whoever sent it. The only thing it can do is move the fan.
+    window.addEventListener('message', function (ev) {
+      var p = ev && ev.data && ev.data.ksHeroScroll;
+      if (typeof p !== 'number' || !isFinite(p)) return;
+      var next = Math.max(-1, Math.min(1, (Math.max(0, Math.min(1, p)) - 0.5) * 2));
+      if (next === scrollTarget) return;
+      scrollTarget = next;
+      kick();
+    });
 
     // Mouse / trackpad — always attached, tracked across the page and measured
     // against the scene. Touch pointers are ignored here; they go through the
