@@ -1,0 +1,110 @@
+/* Everything is scoped under #ks-hero so nothing leaks into the Carrd page. */
+#ks-hero {
+  --ks-bg-1: #dbe6f4;
+  --ks-bg-2: #b6cae6;
+  --ks-ink: #12243d;
+  --ks-radius: 18px;
+
+  position: relative;
+  margin: 0;
+  width: 100%;
+  color: var(--ks-ink);
+  font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+#ks-hero .ks-hero__scene {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2000 / 700;      /* JS swaps this for the narrow layout */
+  overflow: hidden;
+  border-radius: var(--ks-radius);
+  background:
+    radial-gradient(130% 100% at 76% 4%, rgba(255,255,255,.8), rgba(255,255,255,0) 58%),
+    linear-gradient(155deg, var(--ks-bg-1) 0%, var(--ks-bg-2) 100%);
+  perspective-origin: 50% 46%;
+  touch-action: pan-y;           /* the page can still be scrolled past it */
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+}
+#ks-hero .ks-hero__scene.is-dragging { cursor: grabbing; }
+#ks-hero .ks-hero__scene.is-ready .ks-hero__stage { opacity: 1; }
+
+/* The stage fills the scene and is laid out in percentages, so the whole
+   composition scales with the column without a scale() transform — which 3D
+   contexts handle badly — and without ever reflowing. */
+#ks-hero .ks-hero__stage {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 50%;
+  transform-style: preserve-3d;
+  will-change: transform;
+  /* Held back until every shot has decoded — see "reveal" in the script.
+     Without this a large card can paint as a blank white rectangle for a
+     frame or two while its image is still being decoded off the main thread. */
+  opacity: 0;
+  transition: opacity .45s ease;
+  transform:
+    rotateX(var(--ks-rx, 8deg))
+    rotateY(var(--ks-ry, -15deg))
+    rotateZ(var(--ks-rz, 6deg));
+}
+
+#ks-hero .ks-card {
+  position: absolute;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow:
+    0 1px 3px rgba(11, 29, 54, .12),
+    0 18px 36px -10px rgba(11, 29, 54, .28),
+    0 52px 80px -28px rgba(11, 29, 54, .30);
+  /* No transform-style here on purpose: overflow:hidden already forces the
+     used value to flat, and declaring preserve-3d alongside it makes Chromium
+     mislayer the card — it paints as a blank white rectangle until something
+     else forces a repaint. The cards have no 3D children, so flat is right. */
+  will-change: transform;
+}
+#ks-hero .ks-card::after {          /* hairline, so a white card still reads */
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .55);
+  pointer-events: none;
+}
+#ks-hero .ks-card[hidden] { display: none; }
+#ks-hero .ks-card img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 0;
+}
+
+#ks-hero .ks-hero__hint {
+  margin: 10px 2px 0;
+  font-size: 13px;
+  line-height: 1.4;
+  letter-spacing: .01em;
+  opacity: .6;
+}
+
+/* A still composition for anyone who has asked their OS for less movement. */
+@media (prefers-reduced-motion: reduce) {
+  #ks-hero .ks-hero__scene { cursor: default; }
+  #ks-hero .ks-hero__hint { display: none; }
+}
+
+/* Full bleed. Carrd centres its content in a fixed-width column, so the hero
+   is pulled out of it with a negative margin on each side. width:auto rather
+   than 100vw — 100vw includes the scrollbar on some browsers, which would
+   overshoot and clip both edges. */
+#ks-hero {
+  width: auto;
+  max-width: none;
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
+}
+/* Edge to edge, so a radius would only read as a mistake. */
+#ks-hero .ks-hero__scene { border-radius: 0 !important; }
+#ks-hero .ks-hero__hint { display: none; }
