@@ -5,11 +5,34 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Keystone hero</title>
 <style>
-  /* The page IS the hero: no margin, no scrollbars, filling whatever iframe it
-     is given. The iframe decides the shape; this just fills it. */
-  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: transparent; }
-  #ks-hero { height: 100%; }
-  #ks-hero .ks-hero__scene { height: 100%; aspect-ratio: auto !important; border-radius: 0; }
+  /* The page is a frame for the hero. It deliberately does NOT stretch the
+     hero to fill it: the composition is laid out in percentages of its own
+     design space, so forcing a different aspect ratio spreads the cards out
+     and the whole thing reads wrong. Instead the hero keeps its proportions,
+     fills the width, and sits centred — so a frame of the right shape fits it
+     exactly, and a frame of the wrong shape just leaves a band rather than
+     distorting anything. */
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+    background: linear-gradient(155deg, #dbe6f4 0%, #b6cae6 100%);
+  }
+  #ks-hero {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+  }
+  /* !important is load-bearing here: the embed's own <style> sits in <body>,
+     after this one in <head>, and carries the same specificity — so without it
+     the embed's 18px radius wins and the composition gets rounded corners
+     sitting on this square background. */
+  #ks-hero .ks-hero__scene {
+    width: 100%;
+    border-radius: 0 !important;
+  }
   #ks-hero .ks-hero__hint { display: none; }
 </style>
 </head>
@@ -76,7 +99,7 @@
 
 #ks-hero .ks-card {
   position: absolute;
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
   background: #fff;
   box-shadow:
@@ -162,11 +185,11 @@
         motion: 1,
         pos: {
           'smart-dashboard':  { x:  775, y:   65, w: 960, z: -150 },
-          'zurich-ar':        { x:  115, y:  150, w: 350, z:  -80 },
+          'zurich-ar':        { x:  175, y:  150, w: 320, z:  -80 },
           'niac-invest':      { x:  553, y:  410, w: 380, z:  -20 },
           'zurich-balance':   { x: 1295, y:  450, w: 700, z:   60 },
           // The two dark screens are the foreground, pushed out to either edge.
-          'smart-dark-phone': { x: -210, y:  330, w: 420, z:  150 },
+          'smart-dark-phone': { x: -150, y:  330, w: 420, z:  150 },
           'smart-dark':       { x: 1660, y:  130, w: 900, z:  220 }
         }
       },
@@ -209,7 +232,13 @@
     // How far the page's scroll moves the fan, on top of the pointer. The
     // hero sits in a cross-origin iframe and cannot read the parent's scroll
     // itself, so the page posts a 0..1 progress value in (see carrd-iframe.html).
-    var SCROLL = { tilt: 3, drift: 60 };
+    // tilt/drift: how far a scroll pass moves the fan. rest: where in that
+    // pass the cards sit at their designed position, 0 = just entering from
+    // the bottom, 1 = just gone off the top. Biased past the middle on purpose
+    // — this hero sits near the top of its page, so it is already well into
+    // its pass on load. Resting late means the cards start low and rise as the
+    // page scrolls, instead of starting half-travelled with nowhere to go.
+    var SCROLL = { tilt: 4, drift: 160, rest: 0.74 };
 
     var SWING = { rx: 5, ry: 9 };
     var DRIFT = 46;                   // design px a z=0 card slides
@@ -257,7 +286,19 @@
     // and nor must a slow connection (hence the timeout). A card whose shot
     // never arrives — a wrong KS_BASE, say — drops out rather than sitting
     // there as an empty white rectangle.
-    function reveal() { scene.classList.add('is-ready'); }
+    // Two things have to be true before the hero is shown: every shot has
+    // decoded, and we know where the page has it scrolled to. Revealing on
+    // decode alone means it appears centred and then snaps into position the
+    // moment the first scroll reading lands.
+    var haveShots = false, havePosition = false, revealed = false;
+    function reveal() {
+      if (!haveShots || !havePosition || revealed) return;
+      revealed = true;
+      scene.classList.add('is-ready');
+    }
+    // Standalone, with no host page posting anything, nothing would ever
+    // arrive — so stop waiting after a moment and show it centred.
+    setTimeout(function () { havePosition = true; reveal(); }, 500);
     var decoded = els.map(function (e) {
       var img = e.el.firstChild;
       var done = img.decode ? img.decode() :
@@ -272,8 +313,8 @@
         }
       });
     });
-    Promise.all(decoded).then(reveal);
-    setTimeout(reveal, 3000);
+    Promise.all(decoded).then(function () { haveShots = true; reveal(); });
+    setTimeout(function () { haveShots = true; havePosition = true; reveal(); }, 3000);
 
     // ---- layout -----------------------------------------------------------
     var L = null;
@@ -349,12 +390,10 @@
       var ease = dragging ? EASE_DRAG : EASE;
       cur.x += (target.x - cur.x) * ease;
       cur.y += (target.y - cur.y) * ease;
-      scrollCur += (scrollTarget - scrollCur) * 0.12;
       paint();
 
       var settled = Math.abs(target.x - cur.x) < 0.0006 &&
-                    Math.abs(target.y - cur.y) < 0.0006 &&
-                    Math.abs(scrollTarget - scrollCur) < 0.0006 && !vel.x && !vel.y;
+                    Math.abs(target.y - cur.y) < 0.0006 && !vel.x && !vel.y;
       if (!settled) frame = requestAnimationFrame(render);
     }
     function kick() { if (!frame) frame = requestAnimationFrame(render); }
@@ -366,19 +405,53 @@
     if (window.ResizeObserver) new ResizeObserver(onResize).observe(scene);
     else window.addEventListener('resize', onResize);
 
-    if (still) return;   // reduced motion: leave it as a still composition
+    if (still) return;   // reduced motion: no pointer, no swipe, no scroll
 
-    // The page this is embedded in posts its scroll progress (see
-    // carrd-iframe.html). Treat it strictly as data: take a finite number in
-    // 0..1 from the expected field and ignore everything else about the
-    // message, whoever sent it. The only thing it can do is move the fan.
+    // The host page reports where this hero sits in its viewport, once per
+    // frame (the sender is at the bottom of carrd-iframe.html). A cross-origin
+    // iframe cannot read the parent's scroll itself, and an IntersectionObserver
+    // — which can see the top-level viewport — only changes while the hero is
+    // crossing an edge, so it goes dead exactly when the hero is fully on
+    // screen and reports in coarse steps besides. A posted number is
+    // continuous and frame-accurate.
+    //
+    // Treated strictly as data: one finite number from the expected field,
+    // clamped, whoever sent it. All it can do is move the fan.
+    var primed = false;
+
+    // Ask the host page where we are, rather than waiting to be told. The
+    // hero can boot well after the page has sent its opening position — a
+    // lazy iframe below the fold does exactly that — and then it would reveal
+    // itself centred and snap on the first scroll.
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ ksHeroHello: true }, '*');
+      }
+    } catch (e) {}
+
     window.addEventListener('message', function (ev) {
       var p = ev && ev.data && ev.data.ksHeroScroll;
       if (typeof p !== 'number' || !isFinite(p)) return;
-      var next = Math.max(-1, Math.min(1, (Math.max(0, Math.min(1, p)) - 0.5) * 2));
-      if (next === scrollTarget) return;
-      scrollTarget = next;
-      kick();
+      var d = Math.max(-1, Math.min(1, (Math.max(0, Math.min(1, p)) - SCROLL.rest) * 2));
+      if (d === scrollCur) return;
+      // Applied straight away rather than eased. The host already sends one
+      // value per animation frame, so easing on top only adds lag — and it is
+      // what made a late correction visible as a jump instead of landing
+      // silently before the hero was ever shown.
+      scrollTarget = scrollCur = d;
+      paint();
+      // The first reading is where the hero already is, not somewhere to
+      // travel to — without this the whole fan slides into place on load.
+      // Until the hero is actually on screen, snap rather than ease. The
+      // first position can be measured before the iframe has its final size,
+      // so it is often corrected a frame or two later; easing to the
+      // correction is precisely the jump this avoids.
+      if (!primed) {
+        primed = true;
+        // A beat for the layout to settle, absorbing any corrections, before
+        // the hero is shown. Corrections after this land instantly anyway.
+        setTimeout(function () { havePosition = true; reveal(); }, 150);
+      }
     });
 
     // Mouse / trackpad — always attached, tracked across the page and measured
